@@ -1,0 +1,15 @@
+{
+  "name": "piscineo-api",
+  "version": "1.0.0",
+  "description": "Piscineo — backend auth (inscription email + code de vérification, essai 30 jours)",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": { "start": "node index.js" },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "nodemailer": "^6.9.14",
+    "pg": "^8.12.0"
+  }
+}

@@ -9,6 +9,7 @@
 
   /* ---------- Store ---------- */
   var db = load();
+  var LOGGED_IN = !!localStorage.getItem("piscineo_token");
   function load() {
     try {
       var raw = localStorage.getItem(LS);
@@ -85,7 +86,7 @@
     var el = $("#plan-tag");
     if (!el) return;
     if (db.settings.isPro) { el.className = "plan-tag pro"; el.textContent = "Plan Pro ✓"; }
-    else { el.className = "plan-tag free"; el.textContent = "Plan Gratuit"; }
+    else if (LOGGED_IN) { el.className = "plan-tag pro"; el.textContent = "Essai actif"; } else { el.className = "plan-tag free"; el.textContent = "Plan Gratuit"; }
   }
 
   /* ---------- Dashboard ---------- */
@@ -198,7 +199,7 @@
     if (editId) { doc = db.docs.filter(function (d) { return d.id === editId; })[0]; if (!doc) return go("#dashboard"); type = doc.type; }
     else {
       // gating gratuit
-      if (!db.settings.isPro && db.docs.length >= FREE_LIMIT) { upgradeModal(); return go(type === "facture" ? "#factures" : "#devis"); }
+      if (!db.settings.isPro && !LOGGED_IN && db.docs.length >= FREE_LIMIT) { upgradeModal(); return go(type === "facture" ? "#factures" : "#devis"); }
       doc = { id: uid(), type: type, number: nextNumber(type), clientId: db.clients[0] ? db.clients[0].id : "",
         date: todayISO(), validity: addDays(todayISO(), 30), status: "brouillon",
         lines: [{ designation: "", qty: 1, unit: "u", pu: 0, tva: db.settings.tva }], remise: 0, notes: "", createdAt: Date.now(), _new: true };
@@ -339,12 +340,12 @@
           (isDevis ? "Devis gratuit. Bon pour accord, date et signature du client :" : "En votre aimable règlement. Merci de votre confiance.") +
           (db.settings.mentions ? '<br>' + esc(db.settings.mentions) : '') +
         '</div>' +
-        (db.settings.isPro ? '' : '<div class="doc-watermark">Réalisé avec Piscineo — piscineo.fr</div>') +
+        ((db.settings.isPro || LOGGED_IN) ? '' : '<div class="doc-watermark">Réalisé avec Piscineo — piscineo.fr</div>') +
       '</div></div>';
 
     $("#print-doc").onclick = function () { window.print(); };
     if ($("#to-facture")) $("#to-facture").onclick = function () {
-      if (!db.settings.isPro && db.docs.length >= FREE_LIMIT) { upgradeModal(); return; }
+      if (!db.settings.isPro && !LOGGED_IN && db.docs.length >= FREE_LIMIT) { upgradeModal(); return; }
       var f = JSON.parse(JSON.stringify(doc));
       f.id = uid(); f.type = "facture"; f.number = nextNumber("facture"); f.status = "brouillon";
       f.date = todayISO(); f.validity = addDays(todayISO(), 30); f.createdAt = Date.now(); f.sourceDevisId = doc.id; delete f._new;

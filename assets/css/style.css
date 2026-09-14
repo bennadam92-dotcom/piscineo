@@ -245,3 +245,22 @@ table.data tr:hover td { background: var(--bg-soft); }
   .footer-grid { grid-template-columns: 1fr; }
   .doc-a4 { padding: 24px; }
 }
+
+/* ---------- Logo (SVG) ---------- */
+.logo-mark { background: none !important; padding: 0; }
+.logo-mark img { width: 30px; height: 30px; display: block; }
+
+/* ---------- Auth (porte de connexion) ---------- */
+body.locked { overflow: hidden; }
+body.locked .app-shell { display: none; }
+.auth-overlay { position: fixed; inset: 0; background: linear-gradient(160deg, #e0f7fb, #f1f8fa); display: grid; place-items: center; padding: 20px; z-index: 1000; overflow: auto; }
+.auth-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-lg); padding: 34px 30px; max-width: 400px; width: 100%; }
+.auth-logo { display: flex; align-items: center; gap: 10px; justify-content: center; font-weight: 800; font-size: 22px; color: var(--text); margin-bottom: 22px; }
+.auth-logo img { width: 34px; height: 34px; }
+.auth-card h2 { font-size: 20px; margin: 0 0 6px; text-align: center; }
+.auth-sub { color: var(--text-soft); font-size: 14px; text-align: center; margin: 0 0 20px; }
+.auth-field input { width: 100%; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font-size: 16px; font-family: var(--font); margin-bottom: 14px; }
+.auth-field input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+.auth-note { text-align: center; font-size: 13px; color: var(--text-soft); margin: 14px 0 0; }
+.auth-note a { color: var(--green-dark); }
+.auth-msg { text-align: center; font-size: 13px; color: #0e7490; min-height: 18px; margin: 10px 0 0; }
