@@ -29,7 +29,7 @@ try {
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT || "587", 10),
       secure: String(process.env.SMTP_PORT) === "465",
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS || process.env.SMTP_PASSWORD }
     });
   }
 } catch (e) { console.error("SMTP init:", e.message); }
@@ -37,7 +37,7 @@ try {
 async function sendCode(email, code) {
   if (!transporter) { console.log(`[DEV] Code de connexion pour ${email} : ${code}`); return "dev"; }
   await transporter.sendMail({
-    from: process.env.MAIL_FROM || "Piscineo <no-reply@piscineo.fr>",
+    from: process.env.MAIL_FROM || process.env.SMTP_FROM || "Piscineo <no-reply@piscineo.fr>",
     to: email,
     subject: `Votre code Piscineo : ${code}`,
     text: `Votre code de connexion Piscineo est : ${code}\n\nIl est valable 10 minutes.\n\n${APP_URL}`,
