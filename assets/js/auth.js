@@ -98,7 +98,7 @@
     document.getElementById("auth-back").onclick = function (e) { e.preventDefault(); document.getElementById("auth-step2").hidden = true; document.getElementById("auth-step1").hidden = false; };
   }
 
-  function lock() { document.body.classList.add("locked"); renderLogin(); }
+  function lock() { document.body.classList.add("locked"); api("/api/track", { method: "POST", body: JSON.stringify({ event: "signup" }) }).catch(function () {}); renderLogin(); }
   function unlock(user) {
     document.body.classList.remove("locked");
     if (root) root.hidden = true;

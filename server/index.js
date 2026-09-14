@@ -54,9 +54,13 @@ async function sendCode(email, code) {
 /* ---------------- Stockage (Postgres si DATABASE_URL, sinon mémoire) ---------------- */
 function makeMemoryDb() {
   const users = new Map(); // email -> { email, code, code_expires, verified, trial_ends, session_token, created_at }
+  const metrics = {};
   return {
     mode: "memory",
     async init() {},
+    async track(k) { metrics[k] = (metrics[k] || 0) + 1; },
+    async getMetrics() { return Object.assign({ visit_home: 0, visit_signup: 0 }, metrics); },
+    async listUsers() { return [...users.values()]; },
     async setCode(email, code, expires) {
       let u = users.get(email);
       if (!u) { u = { email, verified: false, trial_ends: null, session_token: null, created_at: Date.now() }; users.set(email, u); }
@@ -89,7 +93,11 @@ function makePgDb() {
       await pool.query(`create table if not exists users (
         email text primary key, code text, code_expires bigint,
         verified boolean default false, trial_ends bigint, session_token text, created_at bigint)`);
+      await pool.query(`create table if not exists metrics (key text primary key, count bigint default 0)`);
     },
+    async track(k) { await pool.query(`insert into metrics(key,count) values($1,1) on conflict(key) do update set count=metrics.count+1`, [k]); },
+    async getMetrics() { const r = await pool.query(`select key, count from metrics`); const o = { visit_home: 0, visit_signup: 0 }; r.rows.forEach(x => o[x.key] = Number(x.count)); return o; },
+    async listUsers() { const r = await pool.query(`select email, created_at, verified, trial_ends from users order by created_at desc`); return r.rows; },
     async setCode(email, code, expires) {
       await pool.query(
         `insert into users (email, code, code_expires, created_at) values ($1,$2,$3,$4)
@@ -184,7 +192,42 @@ app.get("/api/stats", async (req, res) => {
   res.json(await db.stats());
 });
 
-app.get("/", (req, res) => res.type("html").send("<h1>Piscineo API</h1><p>Auth email + code, essai 30 jours. Endpoints : /health, /api/auth/*, /api/me, /api/stats.</p>"));
+// Suivi anonyme de l'entonnoir (aucune donnée perso)
+app.post("/api/track", async (req, res) => {
+  const ev = String((req.body && req.body.event) || "").trim();
+  if (ev === "home") await db.track("visit_home");
+  else if (ev === "signup") await db.track("visit_signup");
+  res.json({ ok: true });
+});
+
+// Espace admin — réservé à ADMIN_EMAIL (l'admin se connecte via le code email normal)
+app.get("/api/admin", async (req, res) => {
+  const t = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!t) return res.status(401).json({ error: "non_connecte" });
+  const me = await db.getBySession(t);
+  if (!me) return res.status(401).json({ error: "session_invalide" });
+  const admin = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  if (!admin) return res.status(403).json({ error: "admin_non_configure" });
+  if ((me.email || "").toLowerCase() !== admin) return res.status(403).json({ error: "acces_refuse" });
+  const now = Date.now();
+  const all = await db.listUsers();
+  const users = all.filter(u => (u.email || "").toLowerCase() !== admin); // exclut le compte admin des stats
+  const m = await db.getMetrics();
+  const verified = users.filter(u => u.verified).length;
+  const trialActive = users.filter(u => u.trial_ends && Number(u.trial_ends) > now).length;
+  res.json({
+    kpis: { signups: users.length, verified: verified, trial_active: trialActive, paid: 0, revenue: 0 },
+    funnel: { home: m.visit_home || 0, signup_page: m.visit_signup || 0, completed: verified, abandons: Math.max(0, (m.visit_signup || 0) - verified) },
+    users: users.map(u => ({
+      email: u.email, created_at: Number(u.created_at) || null, verified: !!u.verified,
+      trial_ends: u.trial_ends ? Number(u.trial_ends) : null,
+      days_left: u.trial_ends ? Math.max(0, Math.ceil((Number(u.trial_ends) - now) / 86400000)) : 0,
+      plan: !u.trial_ends ? "none" : (Number(u.trial_ends) > now ? "trial" : "expired")
+    }))
+  });
+});
+
+app.get("/", (req, res) => res.type("html").send("<h1>Piscineo API</h1><p>Auth email + code, essai 30 jours. Endpoints : /health, /api/auth/*, /api/me, /api/admin.</p>"));
 
 db.init().then(() => {
   app.listen(PORT, () => console.log(`Piscineo API (${db.mode}, email:${transporter ? "smtp" : "dev-log"}) sur le port ${PORT}`));

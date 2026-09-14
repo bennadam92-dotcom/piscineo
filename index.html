@@ -183,6 +183,7 @@
   <script>
     document.getElementById("year").textContent = new Date().getFullYear();
     var t = document.querySelector(".nav-toggle"); if (t) t.addEventListener("click", function(){ document.querySelector(".nav").classList.toggle("open"); });
+    try { fetch("https://piscineo-api.onrender.com/api/track", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event: "home" }), keepalive: true }); } catch (e) {}
   </script>
 </body>
 </html>
