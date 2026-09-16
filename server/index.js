@@ -19,6 +19,7 @@ const PORT = process.env.PORT || 3000;
 const TRIAL_DAYS = 30;
 const CODE_TTL = 10 * 60 * 1000; // 10 min
 const APP_URL = process.env.APP_URL || "https://piscineo.onrender.com";
+const BRAND = process.env.BRAND || "Piscineo"; // marque affichée dans les emails (mettre "Devizio" pour le produit multi-métiers)
 
 /* ---------------- Email (nodemailer si SMTP configuré, sinon DEV log) ---------------- */
 let transporter = null;
@@ -37,10 +38,10 @@ try {
 async function sendCode(email, code) {
   if (!transporter) { console.log(`[DEV] Code de connexion pour ${email} : ${code}`); return "dev"; }
   await transporter.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_FROM || "Piscineo <no-reply@piscineo.fr>",
+    from: process.env.MAIL_FROM || process.env.SMTP_FROM || `${BRAND} <no-reply@piscineo.fr>`,
     to: email,
-    subject: `Votre code Piscineo : ${code}`,
-    text: `Votre code de connexion Piscineo est : ${code}\n\nIl est valable 10 minutes.\n\n${APP_URL}`,
+    subject: `Votre code ${BRAND} : ${code}`,
+    text: `Votre code de connexion ${BRAND} est : ${code}\n\nIl est valable 10 minutes.\n\n${APP_URL}`,
     html: `<div style="font-family:Arial,sans-serif;max-width:440px;margin:auto">
       <h2 style="color:#0e7490">Votre code de connexion</h2>
       <p>Saisissez ce code dans Piscineo pour accéder à votre compte :</p>
@@ -61,9 +62,9 @@ function makeMemoryDb() {
     async track(k) { metrics[k] = (metrics[k] || 0) + 1; },
     async getMetrics() { return Object.assign({ visit_home: 0, visit_signup: 0 }, metrics); },
     async listUsers() { return [...users.values()]; },
-    async setCode(email, code, expires) {
+    async setCode(email, code, expires, trade) {
       let u = users.get(email);
-      if (!u) { u = { email, verified: false, trial_ends: null, session_token: null, created_at: Date.now() }; users.set(email, u); }
+      if (!u) { u = { email, verified: false, trial_ends: null, session_token: null, created_at: Date.now(), trade: trade || null }; users.set(email, u); }
       u.code = code; u.code_expires = expires; return u;
     },
     async getUser(email) { return users.get(email) || null; },
@@ -94,15 +95,16 @@ function makePgDb() {
         email text primary key, code text, code_expires bigint,
         verified boolean default false, trial_ends bigint, session_token text, created_at bigint)`);
       await pool.query(`create table if not exists metrics (key text primary key, count bigint default 0)`);
+      await pool.query(`alter table users add column if not exists trade text`);
     },
     async track(k) { await pool.query(`insert into metrics(key,count) values($1,1) on conflict(key) do update set count=metrics.count+1`, [k]); },
     async getMetrics() { const r = await pool.query(`select key, count from metrics`); const o = { visit_home: 0, visit_signup: 0 }; r.rows.forEach(x => o[x.key] = Number(x.count)); return o; },
-    async listUsers() { const r = await pool.query(`select email, created_at, verified, trial_ends from users order by created_at desc`); return r.rows; },
-    async setCode(email, code, expires) {
+    async listUsers() { const r = await pool.query(`select email, created_at, verified, trial_ends, trade from users order by created_at desc`); return r.rows; },
+    async setCode(email, code, expires, trade) {
       await pool.query(
-        `insert into users (email, code, code_expires, created_at) values ($1,$2,$3,$4)
+        `insert into users (email, code, code_expires, created_at, trade) values ($1,$2,$3,$4,$5)
          on conflict (email) do update set code=$2, code_expires=$3`,
-        [email, code, expires, Date.now()]);
+        [email, code, expires, Date.now(), trade || null]);
       return (await pool.query(`select * from users where email=$1`, [email])).rows[0];
     },
     async getUser(email) { return (await pool.query(`select * from users where email=$1`, [email])).rows[0] || null; },
@@ -148,7 +150,8 @@ app.post("/api/auth/signup", async (req, res) => {
   const email = String((req.body.email || "")).trim().toLowerCase();
   if (!emailOk(email)) return res.status(400).json({ error: "email_invalide" });
   const code = gen6();
-  await db.setCode(email, code, Date.now() + CODE_TTL);
+  const trade = String((req.body && req.body.trade) || "").trim().slice(0, 40) || null;
+  await db.setCode(email, code, Date.now() + CODE_TTL, trade);
   try { const mode = await sendCode(email, code); res.json({ ok: true, sent: mode }); }
   catch (e) { console.error("sendCode:", e.message); res.status(500).json({ error: "envoi_impossible" }); }
 });
@@ -219,7 +222,7 @@ app.get("/api/admin", async (req, res) => {
     kpis: { signups: users.length, verified: verified, trial_active: trialActive, paid: 0, revenue: 0 },
     funnel: { home: m.visit_home || 0, signup_page: m.visit_signup || 0, completed: verified, abandons: Math.max(0, (m.visit_signup || 0) - verified) },
     users: users.map(u => ({
-      email: u.email, created_at: Number(u.created_at) || null, verified: !!u.verified,
+      email: u.email, trade: u.trade || null, created_at: Number(u.created_at) || null, verified: !!u.verified,
       trial_ends: u.trial_ends ? Number(u.trial_ends) : null,
       days_left: u.trial_ends ? Math.max(0, Math.ceil((Number(u.trial_ends) - now) / 86400000)) : 0,
       plan: !u.trial_ends ? "none" : (Number(u.trial_ends) > now ? "trial" : "expired")
