@@ -10,6 +10,7 @@
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
 
 const app = express();
 app.use(cors());
@@ -62,6 +63,8 @@ function makeMemoryDb() {
     async track(k) { metrics[k] = (metrics[k] || 0) + 1; },
     async getMetrics() { return Object.assign({ visit_home: 0, visit_signup: 0 }, metrics); },
     async listUsers() { return [...users.values()]; },
+    async setPassword(email, hash) { var u = users.get(email); if (u) u.password_hash = hash; },
+    async setSession(email, t) { var u = users.get(email); if (u) u.session_token = t; },
     async setCode(email, code, expires, trade) {
       let u = users.get(email);
       if (!u) { u = { email, verified: false, trial_ends: null, session_token: null, created_at: Date.now(), trade: trade || null }; users.set(email, u); }
@@ -96,10 +99,13 @@ function makePgDb() {
         verified boolean default false, trial_ends bigint, session_token text, created_at bigint)`);
       await pool.query(`create table if not exists metrics (key text primary key, count bigint default 0)`);
       await pool.query(`alter table users add column if not exists trade text`);
+      await pool.query(`alter table users add column if not exists password_hash text`);
     },
     async track(k) { await pool.query(`insert into metrics(key,count) values($1,1) on conflict(key) do update set count=metrics.count+1`, [k]); },
     async getMetrics() { const r = await pool.query(`select key, count from metrics`); const o = { visit_home: 0, visit_signup: 0 }; r.rows.forEach(x => o[x.key] = Number(x.count)); return o; },
     async listUsers() { const r = await pool.query(`select email, created_at, verified, trial_ends, trade from users order by created_at desc`); return r.rows; },
+    async setPassword(email, hash) { await pool.query(`update users set password_hash=$2 where email=$1`, [email, hash]); },
+    async setSession(email, t) { await pool.query(`update users set session_token=$2 where email=$1`, [email, t]); },
     async setCode(email, code, expires, trade) {
       await pool.query(
         `insert into users (email, code, code_expires, created_at, trade) values ($1,$2,$3,$4,$5)
@@ -152,6 +158,8 @@ app.post("/api/auth/signup", async (req, res) => {
   const code = gen6();
   const trade = String((req.body && req.body.trade) || "").trim().slice(0, 40) || null;
   await db.setCode(email, code, Date.now() + CODE_TTL, trade);
+  const pw = String((req.body && req.body.password) || "");
+  if (pw.length >= 6) { try { await db.setPassword(email, bcrypt.hashSync(pw, 10)); } catch (e) { console.error("setPassword:", e.message); } }
   try { const mode = await sendCode(email, code); res.json({ ok: true, sent: mode }); }
   catch (e) { console.error("sendCode:", e.message); res.status(500).json({ error: "envoi_impossible" }); }
 });
@@ -176,6 +184,20 @@ app.post("/api/auth/resend", async (req, res) => {
   await db.setCode(email, code, Date.now() + CODE_TTL);
   try { await sendCode(email, code); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: "envoi_impossible" }); }
+});
+
+// Connexion par mot de passe
+app.post("/api/auth/login", async (req, res) => {
+  const email = String((req.body.email || "")).trim().toLowerCase();
+  const password = String((req.body.password || ""));
+  if (!emailOk(email) || !password) return res.status(400).json({ error: "identifiants_invalides" });
+  const u = await db.getUser(email);
+  if (!u || !u.password_hash) return res.status(400).json({ error: "identifiants_invalides" });
+  if (!bcrypt.compareSync(password, u.password_hash)) return res.status(400).json({ error: "identifiants_invalides" });
+  if (!u.verified) return res.status(403).json({ error: "non_verifie" });
+  const t = token();
+  await db.setSession(email, t);
+  res.json({ ok: true, token: t, user: publicUser(u) });
 });
 
 // Session courante
